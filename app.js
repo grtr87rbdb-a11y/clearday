@@ -72,6 +72,21 @@ function detectDay(text) {
 function createTask(text) {
   const analysis = analyze(text);
 
+  const reminder = parseReminder(text);
+
+  return {
+    id: crypto.randomUUID(),
+    text,
+    done: false,
+    createdAt: new Date().toISOString(),
+    day: detectDay(text),
+    score: analysis.score,
+    label: analysis.label,
+    reminder: reminder
+  };
+}
+  const analysis = analyze(text);
+
   return {
     id: crypto.randomUUID(),
     text,
