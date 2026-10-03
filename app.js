@@ -385,4 +385,8 @@ async function enableNotifications() {
   }
 }
 
-window.enableNotifications = enableNotifications;
+window.enableNotifications = enableNotifications;const notifyBtn = document.querySelector("#notifyBtn");
+
+if (notifyBtn) {
+  notifyBtn.addEventListener("click", enableNotifications);
+}
