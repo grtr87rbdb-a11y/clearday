@@ -424,4 +424,3 @@ window.enableNotifications = enableNotifications;const notifyBtn = document.quer
 
 if (notifyBtn) {
   notifyBtn.addEventListener("click", enableNotifications);
-}
