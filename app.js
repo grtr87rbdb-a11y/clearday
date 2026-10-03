@@ -363,3 +363,27 @@ if (hour < 12) {
 }
 
 render();
+// ClearDay 0.7 — уведомления
+async function enableNotifications() {
+  if (!("Notification" in window)) {
+    alert("Этот браузер не поддерживает уведомления.");
+    return;
+  }
+
+  if (Notification.permission === "granted") {
+    new Notification("ClearDay", {
+      body: "Уведомления уже включены."
+    });
+    return;
+  }
+
+  const permission = await Notification.requestPermission();
+
+  if (permission === "granted") {
+    new Notification("ClearDay", {
+      body: "Готово. ClearDay сможет показывать напоминания."
+    });
+  }
+}
+
+window.enableNotifications = enableNotifications;
