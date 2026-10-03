@@ -362,8 +362,7 @@ if (hour < 12) {
     "Спокойно закроем сегодняшний день.";
 }
 
-render();
-// ClearDay 0.7 — уведомления
+render();// ClearDay 0.7 — уведомления
 async function enableNotifications() {
   if (!("Notification" in window)) {
     alert("Этот браузер не поддерживает уведомления.");
@@ -387,8 +386,3 @@ async function enableNotifications() {
 }
 
 window.enableNotifications = enableNotifications;
-const notifyBtn = document.querySelector("#notifyBtn");
-
-if (notifyBtn) {
-  notifyBtn.addEventListener("click", enableNotifications);
-}
