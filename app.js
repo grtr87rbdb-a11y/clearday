@@ -1,4 +1,4 @@
-const KEY = "clearday.tasks.v06";
+const KEY = "clearday.tasks.v07";
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -30,6 +30,7 @@ function escapeHTML(text) {
 
 function analyze(text) {
   const value = text.toLowerCase();
+
   let score = 1;
   let label = "Обычная";
 
@@ -69,7 +70,8 @@ function detectDay(text) {
   return dateKey();
 }
 
-function function parseReminder(text) {
+/* Распознаём время вида 15:00, 08:30 и т.д. */
+function parseReminder(text) {
   const match = text.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
 
   if (!match) {
@@ -79,20 +81,23 @@ function function parseReminder(text) {
   const hour = Number(match[1]);
   const minute = Number(match[2]);
 
-  const now = new Date();
-
   const reminder = new Date();
+
   reminder.setHours(hour, minute, 0, 0);
 
-  if (reminder <= now) {
+  /*
+    Если время уже прошло сегодня,
+    переносим напоминание на завтра.
+  */
+  if (reminder <= new Date()) {
     reminder.setDate(reminder.getDate() + 1);
   }
 
   return reminder.toISOString();
-}createTask(text) {
-  const analysis = analyze(text);
+}
 
-  const reminder = parseReminder(text);
+function createTask(text) {
+  const analysis = analyze(text);
 
   return {
     id: crypto.randomUUID(),
@@ -102,31 +107,24 @@ function function parseReminder(text) {
     day: detectDay(text),
     score: analysis.score,
     label: analysis.label,
-    reminder: reminder
-  };
-}
-  const analysis = analyze(text);
-
-  return {
-    id: crypto.randomUUID(),
-    text,
-    done: false,
-    createdAt: new Date().toISOString(),
-    day: detectDay(text),
-    score: analysis.score,
-    label: analysis.label
+    reminder: parseReminder(text),
+    reminderSent: false
   };
 }
 
 function prepareTasks() {
   const tasks = load();
   const today = dateKey();
+
   let changed = false;
 
   tasks.forEach((task) => {
     const analysis = analyze(task.text);
 
-    if (task.score !== analysis.score || task.label !== analysis.label) {
+    if (
+      task.score !== analysis.score ||
+      task.label !== analysis.label
+    ) {
       task.score = analysis.score;
       task.label = analysis.label;
       changed = true;
@@ -137,38 +135,91 @@ function prepareTasks() {
       changed = true;
     }
 
-    // Незавершённые старые задачи возвращаем в сегодняшний список.
-    if (!task.done && task.day < today) {
+    if (
+      !task.done &&
+      task.day < today
+    ) {
       task.day = today;
       task.moved = true;
       changed = true;
     }
+
+    /*
+      Если задача была создана до версии 0.7,
+      пытаемся найти время заново.
+    */
+    if (!("reminder" in task)) {
+      task.reminder = parseReminder(task.text);
+      task.reminderSent = false;
+      changed = true;
+    }
+
+    if (!("reminderSent" in task)) {
+      task.reminderSent = false;
+      changed = true;
+    }
   });
 
-  if (changed) save(tasks);
+  if (changed) {
+    save(tasks);
+  }
 
   return tasks;
+}
+
+function reminderText(task) {
+  if (!task.reminder) {
+    return "";
+  }
+
+  const date = new Date(task.reminder);
+
+  return `🔔 ${date.toLocaleTimeString("ru-RU", {
+    hour: "2-digit",
+    minute: "2-digit"
+  })}`;
 }
 
 function taskHTML(task) {
   return `
     <div class="task ${task.done ? "done" : ""}">
-      <button class="check" data-id="${task.id}">
+      
+      <button
+        class="check"
+        data-id="${task.id}"
+      >
         ${task.done ? "✓" : ""}
       </button>
 
       <div class="taskBody">
-        <div class="text">${escapeHTML(task.text)}</div>
-        <span class="meta">${task.label}</span>
+
+        <div class="text">
+          ${escapeHTML(task.text)}
+        </div>
+
+        <span class="meta">
+          ${escapeHTML(task.label)}
+          ${task.reminder ? " · " + reminderText(task) : ""}
+        </span>
+
       </div>
 
-      <button class="edit" data-edit="${task.id}" title="Изменить">
+      <button
+        class="edit"
+        data-edit="${task.id}"
+        title="Изменить"
+      >
         ✎
       </button>
 
-      <button class="delete" data-delete="${task.id}" title="Удалить">
+      <button
+        class="delete"
+        data-delete="${task.id}"
+        title="Удалить"
+      >
         ×
       </button>
+
     </div>
   `;
 }
@@ -199,6 +250,7 @@ function render() {
 
   const total = todayTasks.length;
   const done = completed.length;
+
   const percent = total
     ? Math.round((done / total) * 100)
     : 0;
@@ -210,33 +262,43 @@ function render() {
       month: "long"
     }).format(new Date());
 
-  $("#focusCount").textContent = `${focus.length}/3`;
-  $("#allCount").textContent = active.length;
+  $("#focusCount").textContent =
+    `${focus.length}/3`;
 
-  $("#focusList").innerHTML = focus.length
-    ? focus.map(taskHTML).join("")
-    : `
-      <div class="emptyState">
-        ${total
-          ? "Главные задачи выполнены. Отличная работа."
-          : "Добавь несколько задач — ClearDay выберет главное."
-        }
-      </div>
-    `;
+  $("#allCount").textContent =
+    active.length;
 
-  $("#allList").innerHTML = remaining.length
-    ? remaining.map(taskHTML).join("")
-    : `
-      <div class="emptyState">
-        ${active.length
-          ? "Все активные задачи уже в Top-3."
-          : "На сегодня больше задач нет."
-        }
-      </div>
-    `;
+  $("#focusList").innerHTML =
+    focus.length
+      ? focus.map(taskHTML).join("")
+      : `
+        <div class="emptyState">
+          ${
+            total
+              ? "Главные задачи выполнены. Отличная работа."
+              : "Добавь несколько задач — ClearDay выберет главное."
+          }
+        </div>
+      `;
 
-  $("#progressPercent").textContent = `${percent}%`;
-  $("#progressBar").style.width = `${percent}%`;
+  $("#allList").innerHTML =
+    remaining.length
+      ? remaining.map(taskHTML).join("")
+      : `
+        <div class="emptyState">
+          ${
+            active.length
+              ? "Все активные задачи уже в Top-3."
+              : "На сегодня больше задач нет."
+          }
+        </div>
+      `;
+
+  $("#progressPercent").textContent =
+    `${percent}%`;
+
+  $("#progressBar").style.width =
+    `${percent}%`;
 
   $("#progressText").textContent =
     `Выполнено ${done} из ${total} задач.`;
@@ -256,28 +318,45 @@ function render() {
 }
 
 function bindButtons() {
-  document.querySelectorAll("[data-id]").forEach((button) => {
-    button.onclick = () => toggleTask(button.dataset.id);
-  });
 
-  document.querySelectorAll("[data-delete]").forEach((button) => {
-    button.onclick = () => deleteTask(button.dataset.delete);
-  });
+  document.querySelectorAll("[data-id]")
+    .forEach((button) => {
 
-  document.querySelectorAll("[data-edit]").forEach((button) => {
-    button.onclick = () => editTask(button.dataset.edit);
-  });
+      button.onclick = () =>
+        toggleTask(button.dataset.id);
+
+    });
+
+  document.querySelectorAll("[data-delete]")
+    .forEach((button) => {
+
+      button.onclick = () =>
+        deleteTask(button.dataset.delete);
+
+    });
+
+  document.querySelectorAll("[data-edit]")
+    .forEach((button) => {
+
+      button.onclick = () =>
+        editTask(button.dataset.edit);
+
+    });
 }
 
 function addTask() {
+
   const input = $("#taskInput");
+
   const text = input.value.trim();
 
   if (!text) return;
 
   const tasks = load();
 
-  tasks.unshift(createTask(text));
+  tasks.unshift(
+    createTask(text)
+  );
 
   save(tasks);
 
@@ -289,138 +368,340 @@ function addTask() {
 }
 
 function toggleTask(id) {
+
   const tasks = load();
-  const task = tasks.find((item) => item.id === id);
+
+  const task = tasks.find(
+    (item) => item.id === id
+  );
 
   if (!task) return;
 
   task.done = !task.done;
 
   if (task.done) {
-    task.completedAt = new Date().toISOString();
+    task.completedAt =
+      new Date().toISOString();
   } else {
     delete task.completedAt;
   }
 
   save(tasks);
+
   render();
 }
 
 function deleteTask(id) {
-  const tasks = load().filter(
-    (task) => task.id !== id
-  );
+
+  const tasks =
+    load().filter(
+      (task) => task.id !== id
+    );
 
   save(tasks);
+
   render();
 }
 
 function editTask(id) {
+
   const tasks = load();
-  const task = tasks.find((item) => item.id === id);
+
+  const task = tasks.find(
+    (item) => item.id === id
+  );
 
   if (!task) return;
 
-  const newText = prompt(
-    "Изменить задачу:",
-    task.text
-  );
+  const newText =
+    prompt(
+      "Изменить задачу:",
+      task.text
+    );
 
-  if (newText === null) return;
+  if (
+    newText === null ||
+    !newText.trim()
+  ) {
+    return;
+  }
 
-  const text = newText.trim();
+  task.text = newText.trim();
 
-  if (!text) return;
+  task.day =
+    detectDay(task.text);
 
-  task.text = text;
-  task.day = detectDay(text);
+  const analysis =
+    analyze(task.text);
 
-  const analysis = analyze(text);
+  task.score =
+    analysis.score;
 
-  task.score = analysis.score;
-  task.label = analysis.label;
+  task.label =
+    analysis.label;
+
+  task.reminder =
+    parseReminder(task.text);
+
+  task.reminderSent =
+    false;
 
   save(tasks);
+
   render();
 }
 
-$("#addBtn").addEventListener("click", addTask);
+/* Разрешение уведомлений */
 
-$("#taskInput").addEventListener("keydown", (event) => {
-  if (event.key === "Enter") {
-    addTask();
+async function enableNotifications() {
+
+  if (!("Notification" in window)) {
+
+    alert(
+      "Этот браузер не поддерживает уведомления."
+    );
+
+    return;
   }
-});
 
-document.querySelectorAll(".chips button").forEach((button) => {
-  button.addEventListener("click", () => {
-    $("#taskInput").value = button.dataset.example;
-    addTask();
+  if (
+    Notification.permission ===
+    "granted"
+  ) {
+
+    new Notification(
+      "ClearDay",
+      {
+        body:
+          "Уведомления уже включены."
+      }
+    );
+
+    return;
+  }
+
+  const permission =
+    await Notification.requestPermission();
+
+  if (
+    permission === "granted"
+  ) {
+
+    new Notification(
+      "ClearDay",
+      {
+        body:
+          "Готово. ClearDay сможет показывать напоминания."
+      }
+    );
+  }
+}
+
+/* Проверка напоминаний */
+
+function checkReminders() {
+
+  if (
+    !("Notification" in window) ||
+    Notification.permission !==
+      "granted"
+  ) {
+    return;
+  }
+
+  const tasks = load();
+
+  const now = Date.now();
+
+  let changed = false;
+
+  tasks.forEach((task) => {
+
+    if (
+      task.done ||
+      !task.reminder ||
+      task.reminderSent
+    ) {
+      return;
+    }
+
+    const reminderTime =
+      new Date(task.reminder)
+        .getTime();
+
+    if (
+      reminderTime <= now
+    ) {
+
+      new Notification(
+        "ClearDay 🔔",
+        {
+          body:
+            task.text
+        }
+      );
+
+      task.reminderSent =
+        true;
+
+      changed = true;
+    }
   });
-});
 
-$("#resetBtn").addEventListener("click", () => {
-  if (!confirm("Удалить все задачи?")) return;
+  if (changed) {
+    save(tasks);
+    render();
+  }
+}
 
-  localStorage.removeItem(KEY);
-  render();
-});
+/* Основные кнопки */
 
-$("#finishDayBtn").addEventListener("click", () => {
-  const tasks = prepareTasks();
-  const today = dateKey();
-
-  const remaining = tasks.filter(
-    (task) => task.day === today && !task.done
+$("#addBtn")
+  .addEventListener(
+    "click",
+    addTask
   );
 
-  if (!remaining.length) {
-    $("#eveningText").textContent =
-      "День завершён. Всё сделано. Отличная работа.";
-    return;
-  }
+$("#taskInput")
+  .addEventListener(
+    "keydown",
+    (event) => {
 
-  $("#eveningText").textContent =
-    `Осталось ${remaining.length}. Незавершённые задачи останутся на следующий день.`;
-});
+      if (
+        event.key === "Enter"
+      ) {
+        addTask();
+      }
 
-const hour = new Date().getHours();
+    }
+  );
 
-if (hour < 12) {
-  $("#greeting").textContent =
-    "Доброе утро. Выберем главное.";
-} else if (hour < 18) {
-  $("#greeting").textContent =
-    "Сосредоточимся на главном.";
-} else {
-  $("#greeting").textContent =
-    "Спокойно закроем сегодняшний день.";
-}
+document
+  .querySelectorAll(".chips button")
+  .forEach((button) => {
 
-render();// ClearDay 0.7 — уведомления
-async function enableNotifications() {
-  if (!("Notification" in window)) {
-    alert("Этот браузер не поддерживает уведомления.");
-    return;
-  }
+    button.addEventListener(
+      "click",
+      () => {
 
-  if (Notification.permission === "granted") {
-    new Notification("ClearDay", {
-      body: "Уведомления уже включены."
-    });
-    return;
-  }
+        $("#taskInput").value =
+          button.dataset.example;
 
-  const permission = await Notification.requestPermission();
+        addTask();
+      }
+    );
 
-  if (permission === "granted") {
-    new Notification("ClearDay", {
-      body: "Готово. ClearDay сможет показывать напоминания."
-    });
-  }
-}
+  });
 
-window.enableNotifications = enableNotifications;const notifyBtn = document.querySelector("#notifyBtn");
+$("#resetBtn")
+  .addEventListener(
+    "click",
+    () => {
+
+      if (
+        !confirm(
+          "Удалить все задачи?"
+        )
+      ) {
+        return;
+      }
+
+      localStorage.removeItem(KEY);
+
+      render();
+    }
+  );
+
+$("#finishDayBtn")
+  .addEventListener(
+    "click",
+    () => {
+
+      const tasks =
+        prepareTasks();
+
+      const today =
+        dateKey();
+
+      const remaining =
+        tasks.filter(
+          (task) =>
+            task.day === today &&
+            !task.done
+        );
+
+      if (!remaining.length) {
+
+        $("#eveningText")
+          .textContent =
+          "День завершён. Всё сделано. Отличная работа.";
+
+        return;
+      }
+
+      $("#eveningText")
+        .textContent =
+        `Осталось ${remaining.length}. Незавершённые задачи останутся на следующий день.`;
+
+    }
+  );
+
+/* Кнопка уведомлений */
+
+const notifyBtn =
+  document.querySelector(
+    "#notifyBtn"
+  );
 
 if (notifyBtn) {
-  notifyBtn.addEventListener("click", enableNotifications);
+
+  notifyBtn.addEventListener(
+    "click",
+    enableNotifications
+  );
+
+}
+
+/* Приветствие */
+
+const hour =
+  new Date().getHours();
+
+if (hour < 12) {
+
+  $("#greeting")
+    .textContent =
+    "Доброе утро. Выберем главное.";
+
+} else if (hour < 18) {
+
+  $("#greeting")
+    .textContent =
+    "Сосредоточимся на главном.";
+
+} else {
+
+  $("#greeting")
+    .textContent =
+    "Спокойно закроем сегодняшний день.";
+
+}
+
+/* Запуск */
+
+render();
+
+/*
+  Проверяем напоминания каждые 30 секунд,
+  пока приложение открыто.
+*/
+
+checkReminders();
+
+setInterval(
+  checkReminders,
+  30000
+);
+
+window.enableNotifications =
+  enableNotifications;
