@@ -68,7 +68,8 @@ function detectDay(text) {
 
   return dateKey();
 }
-function parseReminder(text) {
+
+function function parseReminder(text) {
   const match = text.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
 
   if (!match) {
@@ -88,8 +89,7 @@ function parseReminder(text) {
   }
 
   return reminder.toISOString();
-}
-function createTask(text) {
+}createTask(text) {
   const analysis = analyze(text);
 
   const reminder = parseReminder(text);
