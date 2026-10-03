@@ -1,15 +1,9 @@
-const KEY = "clearday.tasks.v05";
+const KEY = "clearday.tasks.v06";
 
 const $ = (selector) => document.querySelector(selector);
 
-function todayKey(date = new Date()) {
+function dateKey(date = new Date()) {
   return date.toISOString().slice(0, 10);
-}
-
-function tomorrowKey() {
-  const date = new Date();
-  date.setDate(date.getDate() + 1);
-  return todayKey(date);
 }
 
 function load() {
@@ -25,7 +19,7 @@ function save(tasks) {
 }
 
 function escapeHTML(text) {
-  return text.replace(/[&<>"']/g, (char) => ({
+  return String(text).replace(/[&<>"']/g, (char) => ({
     "&": "&amp;",
     "<": "&lt;",
     ">": "&gt;",
@@ -36,15 +30,14 @@ function escapeHTML(text) {
 
 function analyze(text) {
   const value = text.toLowerCase();
-
-  let score = 0;
+  let score = 1;
   let label = "Обычная";
 
   if (/срочно|важно|дедлайн|оплата|клиент|экзамен|встреч/.test(value)) {
     score += 5;
   }
 
-  if (/сегодня|до \d|до [0-2]?\d[:.]/.test(value)) {
+  if (/сегодня|сейчас|до \d|до [0-2]?\d[:.]/.test(value)) {
     score += 4;
   }
 
@@ -52,16 +45,28 @@ function analyze(text) {
     score += 2;
   }
 
-  if (/потом|когда-нибудь|позже/.test(value)) {
+  if (/потом|позже|когда-нибудь|если будет время/.test(value)) {
     score -= 2;
   }
 
   if (score >= 6) label = "Главное";
   else if (score >= 4) label = "Сегодня";
   else if (score >= 2) label = "Скоро";
-  else if (score < 0) label = "На потом";
+  else label = "На потом";
 
   return { score, label };
+}
+
+function detectDay(text) {
+  const value = text.toLowerCase();
+
+  if (/завтра/.test(value)) {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    return dateKey(tomorrow);
+  }
+
+  return dateKey();
 }
 
 function createTask(text) {
@@ -72,10 +77,42 @@ function createTask(text) {
     text,
     done: false,
     createdAt: new Date().toISOString(),
-    day: todayKey(),
+    day: detectDay(text),
     score: analysis.score,
     label: analysis.label
   };
+}
+
+function prepareTasks() {
+  const tasks = load();
+  const today = dateKey();
+  let changed = false;
+
+  tasks.forEach((task) => {
+    const analysis = analyze(task.text);
+
+    if (task.score !== analysis.score || task.label !== analysis.label) {
+      task.score = analysis.score;
+      task.label = analysis.label;
+      changed = true;
+    }
+
+    if (!task.day) {
+      task.day = today;
+      changed = true;
+    }
+
+    // Незавершённые старые задачи возвращаем в сегодняшний список.
+    if (!task.done && task.day < today) {
+      task.day = today;
+      task.moved = true;
+      changed = true;
+    }
+  });
+
+  if (changed) save(tasks);
+
+  return tasks;
 }
 
 function taskHTML(task) {
@@ -90,66 +127,46 @@ function taskHTML(task) {
         <span class="meta">${task.label}</span>
       </div>
 
-      <button class="edit" data-edit="${task.id}">✎</button>
-      <button class="delete" data-delete="${task.id}">×</button>
+      <button class="edit" data-edit="${task.id}" title="Изменить">
+        ✎
+      </button>
+
+      <button class="delete" data-delete="${task.id}" title="Удалить">
+        ×
+      </button>
     </div>
   `;
 }
 
-function prepareTasks() {
-  const tasks = load();
-  const today = todayKey();
-
-  let changed = false;
-
-  tasks.forEach((task) => {
-    if (!task.day) {
-      task.day = today;
-      changed = true;
-    }
-
-    const analysis = analyze(task.text);
-
-    if (
-      task.score !== analysis.score ||
-      task.label !== analysis.label
-    ) {
-      task.score = analysis.score;
-      task.label = analysis.label;
-      changed = true;
-    }
-
-    if (!task.done && task.day < today) {
-      task.day = today;
-      task.moved = true;
-      changed = true;
-    }
-  });
-
-  if (changed) save(tasks);
-
-  return tasks;
-}
-
 function render() {
   const tasks = prepareTasks();
-  const today = todayKey();
+  const today = dateKey();
 
-  const active = tasks.filter(
-    (task) => !task.done && task.day === today
+  const todayTasks = tasks.filter(
+    (task) => task.day === today
   );
 
-  const completed = tasks.filter(
-    (task) => task.done && task.day === today
+  const active = todayTasks.filter(
+    (task) => !task.done
+  );
+
+  const completed = todayTasks.filter(
+    (task) => task.done
   );
 
   const focus = [...active]
     .sort((a, b) => b.score - a.score)
     .slice(0, 3);
 
-  const later = [...active]
-    .sort((a, b) => a.score - b.score)
+  const remaining = [...active]
+    .sort((a, b) => b.score - a.score)
     .slice(3);
+
+  const total = todayTasks.length;
+  const done = completed.length;
+  const percent = total
+    ? Math.round((done / total) * 100)
+    : 0;
 
   $("#todayLabel").textContent =
     new Intl.DateTimeFormat("ru-RU", {
@@ -163,23 +180,41 @@ function render() {
 
   $("#focusList").innerHTML = focus.length
     ? focus.map(taskHTML).join("")
-    : "Сегодня всё спокойно. Добавь новую задачу.";
+    : `
+      <div class="emptyState">
+        ${total
+          ? "Главные задачи выполнены. Отличная работа."
+          : "Добавь несколько задач — ClearDay выберет главное."
+        }
+      </div>
+    `;
 
-  $("#allList").innerHTML = active.length
-    ? active.map(taskHTML).join("")
-    : "Задач на сегодня нет.";
+  $("#allList").innerHTML = remaining.length
+    ? remaining.map(taskHTML).join("")
+    : `
+      <div class="emptyState">
+        ${active.length
+          ? "Все активные задачи уже в Top-3."
+          : "На сегодня больше задач нет."
+        }
+      </div>
+    `;
 
-  const laterText = later.length
-    ? `${later.length} задач осталось после Top-3.`
-    : "После Top-3 ничего лишнего.";
+  $("#progressPercent").textContent = `${percent}%`;
+  $("#progressBar").style.width = `${percent}%`;
 
-  const evening = $("#eveningText");
+  $("#progressText").textContent =
+    `Выполнено ${done} из ${total} задач.`;
 
-  if (evening) {
-    evening.textContent =
-      completed.length
-        ? `Сегодня выполнено: ${completed.length}. ${laterText}`
-        : laterText;
+  if (done === total && total > 0) {
+    $("#eveningText").textContent =
+      "Все задачи выполнены. День можно спокойно закрыть.";
+  } else if (done > 0) {
+    $("#eveningText").textContent =
+      `Сегодня выполнено ${done}. Осталось ${active.length}.`;
+  } else {
+    $("#eveningText").textContent =
+      "Выбери главное и двигайся по одной задаче за раз.";
   }
 
   bindButtons();
@@ -187,11 +222,11 @@ function render() {
 
 function bindButtons() {
   document.querySelectorAll("[data-id]").forEach((button) => {
-    button.onclick = () => toggle(button.dataset.id);
+    button.onclick = () => toggleTask(button.dataset.id);
   });
 
   document.querySelectorAll("[data-delete]").forEach((button) => {
-    button.onclick = () => remove(button.dataset.delete);
+    button.onclick = () => deleteTask(button.dataset.delete);
   });
 
   document.querySelectorAll("[data-edit]").forEach((button) => {
@@ -199,23 +234,26 @@ function bindButtons() {
   });
 }
 
-function add() {
+function addTask() {
   const input = $("#taskInput");
   const text = input.value.trim();
 
   if (!text) return;
 
   const tasks = load();
+
   tasks.unshift(createTask(text));
 
   save(tasks);
 
   input.value = "";
+
   render();
+
   input.focus();
 }
 
-function toggle(id) {
+function toggleTask(id) {
   const tasks = load();
   const task = tasks.find((item) => item.id === id);
 
@@ -233,8 +271,10 @@ function toggle(id) {
   render();
 }
 
-function remove(id) {
-  const tasks = load().filter((task) => task.id !== id);
+function deleteTask(id) {
+  const tasks = load().filter(
+    (task) => task.id !== id
+  );
 
   save(tasks);
   render();
@@ -246,13 +286,22 @@ function editTask(id) {
 
   if (!task) return;
 
-  const text = prompt("Изменить задачу:", task.text);
+  const newText = prompt(
+    "Изменить задачу:",
+    task.text
+  );
 
-  if (text === null || !text.trim()) return;
+  if (newText === null) return;
 
-  task.text = text.trim();
+  const text = newText.trim();
 
-  const analysis = analyze(task.text);
+  if (!text) return;
+
+  task.text = text;
+  task.day = detectDay(text);
+
+  const analysis = analyze(text);
+
   task.score = analysis.score;
   task.label = analysis.label;
 
@@ -260,38 +309,45 @@ function editTask(id) {
   render();
 }
 
-$("#addBtn").onclick = add;
+$("#addBtn").addEventListener("click", addTask);
 
 $("#taskInput").addEventListener("keydown", (event) => {
-  if (event.key === "Enter") add();
+  if (event.key === "Enter") {
+    addTask();
+  }
 });
 
 document.querySelectorAll(".chips button").forEach((button) => {
-  button.onclick = () => {
+  button.addEventListener("click", () => {
     $("#taskInput").value = button.dataset.example;
-    add();
-  };
+    addTask();
+  });
 });
 
-$("#resetBtn").onclick = () => {
-  if (confirm("Удалить все задачи?")) {
-    localStorage.removeItem(KEY);
-    render();
-  }
-};
+$("#resetBtn").addEventListener("click", () => {
+  if (!confirm("Удалить все задачи?")) return;
 
-$("#finishDayBtn").onclick = () => {
-  const tasks = load();
-  const today = todayKey();
+  localStorage.removeItem(KEY);
+  render();
+});
+
+$("#finishDayBtn").addEventListener("click", () => {
+  const tasks = prepareTasks();
+  const today = dateKey();
 
   const remaining = tasks.filter(
-    (task) => !task.done && task.day === today
-  ).length;
+    (task) => task.day === today && !task.done
+  );
 
-  $("#eveningText").textContent = remaining
-    ? `Осталось ${remaining}. Не обязательно закончить всё сегодня.`
-    : "День закрыт. Все задачи выполнены.";
-};
+  if (!remaining.length) {
+    $("#eveningText").textContent =
+      "День завершён. Всё сделано. Отличная работа.";
+    return;
+  }
+
+  $("#eveningText").textContent =
+    `Осталось ${remaining.length}. Незавершённые задачи останутся на следующий день.`;
+});
 
 const hour = new Date().getHours();
 
