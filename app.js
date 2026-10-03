@@ -68,7 +68,27 @@ function detectDay(text) {
 
   return dateKey();
 }
+function parseReminder(text) {
+  const match = text.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
 
+  if (!match) {
+    return null;
+  }
+
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+
+  const now = new Date();
+
+  const reminder = new Date();
+  reminder.setHours(hour, minute, 0, 0);
+
+  if (reminder <= now) {
+    reminder.setDate(reminder.getDate() + 1);
+  }
+
+  return reminder.toISOString();
+}
 function createTask(text) {
   const analysis = analyze(text);
 
